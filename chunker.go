@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -11,7 +12,7 @@ import (
 	"time"
 )
 
-const CHUNKSIZE = 1000000	// 1MB
+const chunkSize = 1000000 // 1MB
 
 func (t *Transfer) chunkAndSend(sendChan chan bool, n Network) {
 	start := time.Now()
@@ -28,12 +29,12 @@ func (t *Transfer) chunkAndSend(sendChan chan bool, n Network) {
 	fmt.Printf("File size: %d\n", fileSize)
 	fmt.Printf("MD5 hash: %x\n", getHash(t.Filepath))
 
-	numChunks := ceil(fileSize, CHUNKSIZE)
+	numChunks := ceil(fileSize, chunkSize)
 
 	bytesLeft := fileSize
 	var i int64
 	for i = 0; i < numChunks; i++ {
-		bufferSize := min(CHUNKSIZE, bytesLeft)
+		bufferSize := min(chunkSize, bytesLeft)
 		buffer := make([]byte, bufferSize)
 		bytesRead, err := file.Read(buffer)
 		if int64(bytesRead) != bufferSize {
@@ -66,7 +67,7 @@ func (t *Transfer) chunkAndSend(sendChan chan bool, n Network) {
 	fmt.Printf("\n")
 	if runtime.GOOS == "darwin" {
 		t.AdHocChan <- false
-		<- t.AdHocChan
+		<-t.AdHocChan
 	}
 	fmt.Printf("\nSending took %s\n", time.Since(start))
 	sendChan <- true
@@ -121,7 +122,7 @@ func (t *Transfer) receiveAndAssemble(receiveChan chan bool, n Network) {
 	fmt.Println("Received file size: ", getSize(outFile))
 	fmt.Printf("Received file hash: %x\n", getHash(t.Filepath))
 	fmt.Printf("Receiving took %s\n", time.Since(start))
-	speed := (float64(getSize(outFile)*8) / 1000000) / (float64(time.Since(start))/1000000000)
+	speed := (float64(getSize(outFile)*8) / 1000000) / (float64(time.Since(start)) / 1000000000)
 	fmt.Printf("Speed: %.2fmbps\n", speed)
 	// signal main that it's okay to return
 	receiveChan <- true
@@ -146,15 +147,29 @@ func getHash(filepath string) (md5hash []byte) {
 	return
 }
 
-
-func ceil(x,y int64) int64 {
-	if x % y != 0 {
-		return ((x/y) + 1)
+func getHashSHA256(filepath string) []byte {
+	file, err := os.Open(filepath)
+	if err != nil {
+		fmt.Println(filepath)
+		panic(err)
 	}
-	return x/y
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		panic(err)
+	}
+	return hash.Sum(nil)
 }
 
-func min(x,y int64) int64 {
-	if x < y { return x }
+func ceil(x, y int64) int64 {
+	if x%y != 0 {
+		return ((x / y) + 1)
+	}
+	return x / y
+}
+
+func min(x, y int64) int64 {
+	if x < y {
+		return x
+	}
 	return y
 }

@@ -3,10 +3,11 @@ package main
 import (
 	"bufio"
 	"crypto/md5"
+	"crypto/rand"
+	"encoding/base32"
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"os"
 	"runtime"
@@ -15,9 +16,9 @@ import (
 	"time"
 )
 
-const DIAL_TIMEOUT = 60
-const JOIN_ADHOC_TIMEOUT = 60
-const FIND_MAC_TIMEOUT = 60
+const dialTimeout = 60
+const joinAdHocTimout = 60
+const findMACTimeout = 60
 
 func main() {
 
@@ -25,27 +26,24 @@ func main() {
 		printUsage()
 		return
 	}
-
-	var p_outFile = flag.String("send", "", "File to be sent.")
-	var p_inFile = flag.String("receive", "", "Destination path of file to be received.")
-	var p_port = flag.Int("port", 3290, "TCP port to use (must match on both ends).")
-	var p_peer = flag.String("peer", "", "Use \"-peer mac\" or \"-peer windows\" to match the other computer.")
+	var outFile, inFile, peer string
+	var port int
+	flag.StringVar(&outFile, "send", "", "File to be sent.")
+	flag.StringVar(&inFile, "receive", "", "Destination path of file to be received.")
+	flag.IntVar(&port, "port", 3290, "TCP port to use (must match on both ends).")
+	flag.StringVar(&peer, "peer", "", "Use \"-peer mac\" or \"-peer windows\" to match the other computer.")
 	flag.Parse()
-	outFile := *p_outFile
-	inFile := *p_inFile
-	port := *p_port
-	peer := *p_peer
 
 	receiveChan := make(chan bool)
 	sendChan := make(chan bool)
 
-	if peer == "" || ( peer != "mac" && peer != "windows" ) {
+	if peer == "" || (peer != "mac" && peer != "windows") {
 		log.Fatal("Must choose [ -peer mac ] or [ -peer windows ].")
 	}
 	t := Transfer{
-		Port:       port,
-		Peer:       peer,
-		AdHocChan:	make(chan bool),
+		Port:      port,
+		Peer:      peer,
+		AdHocChan: make(chan bool),
 	}
 	var n Network
 
@@ -73,15 +71,15 @@ func main() {
 		<-sendChan
 		fmt.Println("Send complete, resetting WiFi and exiting.")
 
-	//receiving
+		//receiving
 	} else if inFile != "" && outFile == "" {
-		t.Passphrase = generatePassword()
+		t.Passphrase = generatePassword(8)
 		pwBytes := md5.Sum([]byte(t.Passphrase))
 		prefix := pwBytes[:3]
 		t.SSID = fmt.Sprintf("flyingCarpet_%x", prefix)
-		fmt.Printf("=============================\n" +
-			"Transfer password: %s\nPlease use this password on sending end when prompted to start transfer.\n" +
-			"=============================\n",t.Passphrase)
+		fmt.Printf("=============================\n"+
+			"Transfer password: %s\nPlease use this password on sending end when prompted to start transfer.\n"+
+			"=============================\n", t.Passphrase)
 
 		if runtime.GOOS == "windows" {
 			n = WindowsNetwork{Mode: "receiving"}
@@ -108,7 +106,7 @@ func (t *Transfer) receiveFile(receiveChan chan bool, n Network) {
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(t.Port))
 	if err != nil {
 		n.teardown(t)
-		log.Fatal("Could not listen on :",t.Port)
+		log.Fatal("Could not listen on :", t.Port)
 	}
 	fmt.Println("Listening on", ":"+strconv.Itoa(t.Port))
 	receiveChan <- true
@@ -116,7 +114,7 @@ func (t *Transfer) receiveFile(receiveChan chan bool, n Network) {
 		conn, err := ln.Accept()
 		if err != nil {
 			n.teardown(t)
-			log.Fatal("Error accepting connection on :",t.Port)
+			log.Fatal("Error accepting connection on :", t.Port)
 		}
 		t.Conn = conn
 		fmt.Println("Connection accepted")
@@ -127,9 +125,9 @@ func (t *Transfer) receiveFile(receiveChan chan bool, n Network) {
 func (t *Transfer) sendFile(sendChan chan bool, n Network) bool {
 	var conn net.Conn
 	var err error
-	for i := 0; i < DIAL_TIMEOUT; i++ {
+	for i := 0; i < dialTimeout; i++ {
 		err = nil
-		conn, err = net.DialTimeout("tcp", t.RecipientIP+":"+strconv.Itoa(t.Port), time.Millisecond * 10)
+		conn, err = net.DialTimeout("tcp", t.RecipientIP+":"+strconv.Itoa(t.Port), time.Millisecond*10)
 		if err != nil {
 			fmt.Printf("\rFailed connection %2d to %s, retrying.", i, t.RecipientIP)
 			time.Sleep(time.Second * 1)
@@ -141,24 +139,23 @@ func (t *Transfer) sendFile(sendChan chan bool, n Network) bool {
 			return true
 		}
 	}
-	fmt.Printf("Waited %d seconds, no connection. Exiting.", DIAL_TIMEOUT)
+	fmt.Printf("Waited %d seconds, no connection. Exiting.", dialTimeout)
 	return false
 }
 
-func generatePassword() string {
-	const chars = "0123456789abcdefghijkmnopqrstuvwxyzABCDEFGHIJKLMNPQRSTUVWXYZ"
-	rand.Seed(time.Now().UTC().UnixNano())
-	pwBytes := make([]byte, 8)
-	for i := range pwBytes {
-		pwBytes[i] = chars[rand.Intn(len(chars))]
+func generatePassword(length int) string {
+	randomBytes := make([]byte, 32)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		panic(err)
 	}
-	return string(pwBytes)
+	return base32.StdEncoding.EncodeToString(randomBytes)[:length]
 }
 
 func getPassword() (pw string) {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Enter password from receiving end: ")
-	pw,err := reader.ReadString('\n')
+	pw, err := reader.ReadString('\n')
 	if err != nil {
 		panic("Error getting password.")
 	}
@@ -182,7 +179,7 @@ type Transfer struct {
 	Port        int
 	RecipientIP string
 	Peer        string
-	AdHocChan	chan bool
+	AdHocChan   chan bool
 }
 
 type Network interface {
